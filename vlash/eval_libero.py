@@ -93,7 +93,15 @@ def warmup_compiled_policy_for_eval(
 
     # Add dummy image observations with correct shape [B, C, H, W]
     for img_key, img_feature in policy.config.image_features.items():
-        channels, height, width = img_feature.shape
+        shape = img_feature.shape
+        if len(shape) != 3:
+            raise ValueError(f"Unexpected image feature shape for {img_key}: {shape}")
+        if shape[0] in (1, 3, 4):
+            channels, height, width = shape
+        elif shape[-1] in (1, 3, 4):
+            height, width, channels = shape
+        else:
+            channels, height, width = shape
         dummy_obs[img_key] = torch.zeros(
             (1, channels, height, width),
             dtype=torch.float32,

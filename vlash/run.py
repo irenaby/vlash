@@ -29,6 +29,7 @@ Usage:
 """
 
 import logging
+import os
 import time
 from dataclasses import asdict
 from pprint import pformat
@@ -380,7 +381,12 @@ def load_and_compile_policy(cfg: RunConfig) -> PreTrainedPolicy:
     )
 
     if cfg.policy.compile_model:
-        warmup_compiled_policy(policy, cfg.single_task)
+        warmup_env = os.getenv("VLASH_WARMUP", "").strip().lower()
+        if warmup_env not in ("", "0", "false", "no"):
+            warmup_steps = 3
+            if warmup_env.isdigit():
+                warmup_steps = max(1, int(warmup_env))
+            warmup_compiled_policy(policy, cfg.single_task, warmup_steps)
 
     return policy
 
