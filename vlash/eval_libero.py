@@ -340,7 +340,7 @@ def rollout(
     
     while not np.all(done):
         if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
-        action_start = time.perf_counter()
+            action_start = time.perf_counter()
         # Process current observation once
         observation = merge_observation(observation)
         observation = preprocess_observation(observation)
