@@ -13,6 +13,9 @@ from pprint import pformat
 from typing import Callable, TypedDict
 import importlib
 
+# Timing toggle (shared convention with policy modules)
+TIMING_ENABLED = os.getenv("VLASH_TIMING", "").lower() not in ("", "0", "false", "no")
+
 # Register VLASH policy configs (pi0/pi05) into LeRobot's config registry
 # so `PreTrainedConfig.from_pretrained()` can decode VLASH config.json.
 import vlash.configs  # noqa: F401
@@ -261,6 +264,7 @@ def rollout(
     all_dones = []
     
     done = np.array([False] * len(env))
+
     
     # Buffer to store previous observations for async_delay
     observation_buffer = []  # List of observation dicts (merged and preprocessed)
@@ -317,7 +321,12 @@ def rollout(
             print(f"[DEBUG] Merged action shape: {merged_action.shape}")
         
         # Execute the merged action once
+        if TIMING_ENABLED:
+            env_step_start = time.perf_counter()
         observation, reward, terminated, truncated, info = env.step(merged_action)
+        if TIMING_ENABLED:
+            env_step_elapsed = time.perf_counter() - env_step_start
+            print(f"ENV_STEP {env_step_elapsed:.6f}")
         if render_callback is not None:
             render_callback(env)
         
@@ -491,6 +500,8 @@ def eval_policy(
                     ep_frames.append(np.stack(frames))
             else:
                 render_frame = None
+            if TIMING_ENABLED:
+                episode_start_time = time.perf_counter()
             rollout_data = rollout(
                 env,
                 policy,
@@ -502,6 +513,9 @@ def eval_policy(
                 method=method,
                 action_quant=action_quant,
             )
+            if TIMING_ENABLED:
+                episode_elapsed = time.perf_counter() - episode_start_time
+                print(f"EPISODE {episode_elapsed:.6f}")
 
             n_steps = rollout_data["action"].shape[1]
             done_indices = torch.argmax(rollout_data["done"].to(int), dim=1)
@@ -623,6 +637,7 @@ def eval_main(cfg: EvalPipelineConfig):
     logging.info(f"Evaluating {len(task_ids)} tasks: {task_ids}")
     
     # Multi-GPU support: split episodes across GPUs
+    total_episodes = None
     if cfg.num_gpus > 1:
         # In multi-GPU mode, we need to distribute episodes evenly across GPUs
         # First, calculate how many episodes each task should contribute per GPU
@@ -672,11 +687,13 @@ def eval_main(cfg: EvalPipelineConfig):
     else:
         # Single GPU mode: use original scheduling
         schedule = schedule_envs(task_suite, task_ids, cfg.eval.batch_size)
+        total_episodes = sum(len(episodes) for batch in schedule for _, _, episodes in batch)
     
     logging.info("Making policy...")
     policy = make_policy(cfg=cfg.policy, env_cfg=cfg.env)
     policy.eval()
     
+    start_time = time.time()
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():
         # Get progress callback if it exists (used by multi-GPU setup)
         progress_callback = getattr(cfg, '_progress_callback', None)
@@ -720,6 +737,8 @@ def eval_main(cfg: EvalPipelineConfig):
     
     print(info)
     
+    elapsed = time.time() - start_time
+
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -742,6 +761,38 @@ def eval_main(cfg: EvalPipelineConfig):
         
         with open(Path(cfg.output_dir) / "eval_results.json", "w") as f:
             json.dump(ordered_info, f, indent=2)
+
+        if total_episodes is not None:
+            print("\n")
+            logging.info(colored(f"{'='*60}", "cyan", attrs=["bold"]))
+            logging.info(colored("Evaluation Complete!", "cyan", attrs=["bold"]))
+            logging.info(colored(f"{'='*60}", "cyan", attrs=["bold"]))
+            logging.info(f"Total time: {elapsed:.1f}s ({elapsed/60:.1f} minutes)")
+            if elapsed > 0:
+                logging.info(f"Completed episodes: {total_episodes}/{total_episodes}")
+                logging.info(f"Throughput: {total_episodes/elapsed:.2f} episodes/second")
+
+            print("\n" + colored("="*60, "cyan", attrs=["bold"]))
+            print(colored("Final Results:", "cyan", attrs=["bold"]))
+            print(colored("="*60, "cyan", attrs=["bold"]))
+
+            if 'overall' in ordered_info:
+                overall = ordered_info['overall']
+                success_rate = f"{overall['pc_successes']:.1f}%"
+                print(f"Success Rate: {colored(success_rate, 'green', attrs=['bold'])}")
+                print(f"Avg Rewards:  {overall['avg_sum_rewards']:.3f}")
+                print(f"Max Rewards:  {overall['avg_max_rewards']:.3f}")
+                if 'avg_episode_length' in overall:
+                    print(f"Avg Episode Length: {overall['avg_episode_length']:.1f} timesteps")
+
+            print("\nPer-task results:")
+            for key in sorted(ordered_info.keys()):
+                if key not in ['overall', 'eval_s', 'video_paths']:
+                    task_result = ordered_info[key]
+                    ep_len_str = f", {task_result['avg_episode_length']:.1f} steps" if 'avg_episode_length' in task_result else ""
+                    print(f"  {key}: {task_result['pc_successes']:.1f}% success{ep_len_str}")
+
+            print(colored("="*60, "cyan", attrs=["bold"]))
     
     logging.info("End of eval")
     

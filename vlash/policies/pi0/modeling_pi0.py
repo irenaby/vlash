@@ -29,6 +29,7 @@ Architecture:
 """
 
 import builtins
+import time
 import math
 import os
 from collections import deque
@@ -38,6 +39,8 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 from transformers.models.gemma.modeling_gemma import GemmaForCausalLM, _gated_residual
+
+TIMING_ENABLED = os.getenv("VLASH_TIMING", "").lower() not in ("", "0", "false", "no")
 from transformers.models.paligemma.modeling_paligemma import PaliGemmaForConditionalGeneration
 from transformers import AutoTokenizer
 
@@ -1027,7 +1030,15 @@ class PI0Policy(PreTrainedPolicy):
     def select_action(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
         """Select single action using action chunking."""
         if len(self._action_queue) == 0:
-            actions = self.predict_action_chunk(batch, noise=noise)
+            if TIMING_ENABLED:
+                torch.cuda.synchronize()
+                start_time = time.perf_counter()
+                actions = self.predict_action_chunk(batch, noise=noise)
+                torch.cuda.synchronize()
+                elapsed = time.perf_counter() - start_time
+                print(f"PREDICT_CHUNK {elapsed:.6f}")
+            else:
+                actions = self.predict_action_chunk(batch, noise=noise)
             self._action_queue.extend(actions.transpose(0, 1)[: self.config.n_action_steps])
         return self._action_queue.popleft()
 
