@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-POLICY_PATH=$1
-NUM_GPUS=$2
 
+: "${POLICY_PATH:=mit-han-lab/vlash-pi05-libero-async5}"
+: "${NUM_GPUS:=1}"
 : "${N_EPISODES:=500}"
 : "${BATCH_SIZE:=32}"
 : "${N_ACTION_STEPS:=5}"
