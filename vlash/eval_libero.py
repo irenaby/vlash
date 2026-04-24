@@ -339,6 +339,8 @@ def rollout(
     loop_iteration = 0
     
     while not np.all(done):
+        if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
+        action_start = time.perf_counter()
         # Process current observation once
         observation = merge_observation(observation)
         observation = preprocess_observation(observation)
@@ -393,7 +395,6 @@ def rollout(
         if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
             env_step_elapsed = time.perf_counter() - env_step_start
             print(f"ENV_STEP {env_step_elapsed:.6f}")
-            TIMING_COUNT += 1
         if render_callback is not None:
             render_callback(env)
         
@@ -408,6 +409,10 @@ def rollout(
         all_successes.append(torch.tensor(successes))
         
         loop_iteration += 1
+        if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
+            action_elapsed = time.perf_counter() - action_start
+            print(f"PROCESS_ONE_ACTION {env_step_elapsed:.6f}")
+            TIMING_COUNT += 1
     
     if return_observations:
         observation = preprocess_observation(observation)
@@ -583,7 +588,7 @@ def eval_policy(
             n_steps = rollout_data["action"].shape[1]
             if TIMING_EPISODE_ENABLED:
                 episode_elapsed = time.perf_counter() - episode_start_time
-                print(f"EPISODE {episode_elapsed:.6f} STEPS {n_steps} AVG_EPISODE_TIME {episode_elapsed/n_steps:.6f}")
+                print(f"EPISODE {episode_elapsed:.6f} STEPS {n_steps} AVG_STEP_TIME {episode_elapsed/n_steps:.6f}")
             done_indices = torch.argmax(rollout_data["done"].to(int), dim=1)
             
             mask = (torch.arange(n_steps) <= einops.repeat(done_indices + 1, "b -> b s", s=n_steps)).int()
