@@ -411,7 +411,7 @@ def rollout(
         loop_iteration += 1
         if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
             action_elapsed = time.perf_counter() - action_start
-            print(f"PROCESS_ONE_ACTION {env_step_elapsed:.6f}")
+            print(f"PROCESS_ONE_ACTION {action_elapsed:.6f}")
             TIMING_COUNT += 1
     
     if return_observations:
