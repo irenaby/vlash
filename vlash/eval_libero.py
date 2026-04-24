@@ -583,7 +583,7 @@ def eval_policy(
             n_steps = rollout_data["action"].shape[1]
             if TIMING_EPISODE_ENABLED:
                 episode_elapsed = time.perf_counter() - episode_start_time
-                print(f"EPISODE {episode_elapsed:.6f} STEPS {n_steps}")
+                print(f"EPISODE {episode_elapsed:.6f} STEPS {n_steps} AVG_EPISODE_TIME {time/n_steps:.6f}")
             done_indices = torch.argmax(rollout_data["done"].to(int), dim=1)
             
             mask = (torch.arange(n_steps) <= einops.repeat(done_indices + 1, "b -> b s", s=n_steps)).int()
