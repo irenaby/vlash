@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+set -x
 
 : "${POLICY_PATH:=mit-han-lab/vlash-pi05-libero-async5}"
 : "${NUM_GPUS:=1}"
@@ -24,7 +24,7 @@ export TOKENIZERS_PARALLELISM=false
 
 for suite in "${SUITES[@]}"; do
   for async_delay in "${DELAYS[@]}"; do
-    out="/outputs/eval/pi05_async_libero/${suite}/async_delay_${async_delay}_action_${N_ACTION_STEPS}/vlash"
+    out="/outputs/eval/pi05_async_libero/${suite}/async_delay${async_delay}_actions${N_ACTION_STEPS}_gpu${NUM_GPUS}_b${BATCH_SIZE}_compile${COMPILE}/vlash"
     echo "[RUN] suite=${suite} async_delay=${async_delay} -> ${out}"
 
     python -m vlash.cli eval-libero \
