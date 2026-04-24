@@ -488,7 +488,6 @@ def eval_policy(
             "avg_episode_length": [],  # Track episode lengths (simulation timesteps)
         }
     }
-    descriptions = []
     # Track how many episodes have been rendered per task
     rendered_count_by_task: dict[str, int] = {}
     video_paths_by_task: dict[str, list[str]] = {}
@@ -501,6 +500,7 @@ def eval_policy(
         
         env_limits = []
         env_names = []
+        descriptions = []
         # Pre-assign global episode indices for this batch
         # This maps (env_idx, episode_idx) -> global_episode_number
         batch_episode_map = {}
