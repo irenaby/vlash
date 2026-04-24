@@ -13,8 +13,24 @@ from pprint import pformat
 from typing import Callable, TypedDict
 import importlib
 
-# Timing toggle (shared convention with policy modules)
-TIMING_ENABLED = os.getenv("VLASH_TIMING", "").lower() not in ("", "0", "false", "no")
+# Timing toggles (shared convention with policy modules)
+def _parse_timing_env(name: str) -> tuple[bool, int | None]:
+    value = os.getenv(name, "").strip().lower()
+    if value in ("", "0", "false", "no"):
+        return False, None
+    if value.isdigit():
+        limit = int(value)
+        if limit <= 0:
+            return False, None
+        if limit == 1:
+            return True, None
+        return True, limit
+    return True, None
+
+
+TIMING_ENABLED, TIMING_LIMIT = _parse_timing_env("VLASH_TIMING")
+TIMING_COUNT = 0
+TIMING_EPISODE_ENABLED = os.getenv("VLASH_TIMING_EPISODE", "").lower() not in ("", "0", "false", "no")
 
 # Register VLASH policy configs (pi0/pi05) into LeRobot's config registry
 # so `PreTrainedConfig.from_pretrained()` can decode VLASH config.json.
@@ -61,6 +77,47 @@ from lerobot.utils.utils import (
     init_logging,
     inside_slurm,
 )
+
+
+def warmup_compiled_policy_for_eval(
+    policy: PreTrainedPolicy,
+    single_task: str | None,
+    warmup_steps: int = 3,
+) -> None:
+    """Warm up compiled policy to trigger torch.compile before evaluation."""
+    logging.info("Warming up compiled policy for eval...")
+
+    device = get_safe_torch_device(policy.config.device)
+
+    dummy_obs = {}
+
+    # Add dummy image observations with correct shape [B, C, H, W]
+    for img_key, img_feature in policy.config.image_features.items():
+        channels, height, width = img_feature.shape
+        dummy_obs[img_key] = torch.zeros(
+            (1, channels, height, width),
+            dtype=torch.float32,
+            device=device,
+        )
+
+    # Add dummy state observation with correct shape [B, state_dim]
+    if "observation.state" in policy.config.input_features:
+        state_dim = policy.config.input_features["observation.state"].shape[0]
+        dummy_obs["observation.state"] = torch.zeros(
+            (1, state_dim),
+            dtype=torch.float32,
+            device=device,
+        )
+
+    # Add task string
+    dummy_obs["task"] = single_task if single_task is not None else ""
+
+    warmup_start = time.perf_counter()
+    for _ in range(warmup_steps):
+        with torch.inference_mode():
+            _ = policy.predict_action_chunk(dummy_obs)
+    warmup_time = time.perf_counter() - warmup_start
+    logging.info(f"Warmup complete ({warmup_steps} steps in {warmup_time:.2f}s)")
 
 from libero.libero.envs import SubprocVectorEnv
 from libero.libero import benchmark, get_libero_path
@@ -240,6 +297,7 @@ def rollout(
     action_quant: int = 1,
 ):
     device = get_device_from_parameters(policy)
+    global TIMING_COUNT
     
     # Validate that n_action_steps is divisible by action_quant
     if hasattr(policy, 'config') and hasattr(policy.config, 'n_action_steps'):
@@ -321,12 +379,13 @@ def rollout(
             print(f"[DEBUG] Merged action shape: {merged_action.shape}")
         
         # Execute the merged action once
-        if TIMING_ENABLED:
+        if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
             env_step_start = time.perf_counter()
         observation, reward, terminated, truncated, info = env.step(merged_action)
-        if TIMING_ENABLED:
+        if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
             env_step_elapsed = time.perf_counter() - env_step_start
             print(f"ENV_STEP {env_step_elapsed:.6f}")
+            TIMING_COUNT += 1
         if render_callback is not None:
             render_callback(env)
         
@@ -500,7 +559,7 @@ def eval_policy(
                     ep_frames.append(np.stack(frames))
             else:
                 render_frame = None
-            if TIMING_ENABLED:
+            if TIMING_EPISODE_ENABLED:
                 episode_start_time = time.perf_counter()
             rollout_data = rollout(
                 env,
@@ -513,11 +572,10 @@ def eval_policy(
                 method=method,
                 action_quant=action_quant,
             )
-            if TIMING_ENABLED:
-                episode_elapsed = time.perf_counter() - episode_start_time
-                print(f"EPISODE {episode_elapsed:.6f}")
-
             n_steps = rollout_data["action"].shape[1]
+            if TIMING_EPISODE_ENABLED:
+                episode_elapsed = time.perf_counter() - episode_start_time
+                print(f"EPISODE {episode_elapsed:.6f} STEPS {n_steps}")
             done_indices = torch.argmax(rollout_data["done"].to(int), dim=1)
             
             mask = (torch.arange(n_steps) <= einops.repeat(done_indices + 1, "b -> b s", s=n_steps)).int()
@@ -692,6 +750,8 @@ def eval_main(cfg: EvalPipelineConfig):
     logging.info("Making policy...")
     policy = make_policy(cfg=cfg.policy, env_cfg=cfg.env)
     policy.eval()
+    if getattr(cfg.policy, "compile_model", False):
+        warmup_compiled_policy_for_eval(policy, cfg.task_description)
     
     start_time = time.time()
     with torch.no_grad(), torch.autocast(device_type=device.type) if cfg.policy.use_amp else nullcontext():

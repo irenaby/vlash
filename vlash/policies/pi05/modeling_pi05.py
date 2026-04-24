@@ -41,7 +41,22 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from transformers.models.gemma.modeling_gemma import GemmaForCausalLM, _gated_residual
 
-TIMING_ENABLED = os.getenv("VLASH_TIMING", "").lower() not in ("", "0", "false", "no")
+def _parse_timing_env(name: str) -> tuple[bool, int | None]:
+    value = os.getenv(name, "").strip().lower()
+    if value in ("", "0", "false", "no"):
+        return False, None
+    if value.isdigit():
+        limit = int(value)
+        if limit <= 0:
+            return False, None
+        if limit == 1:
+            return True, None
+        return True, limit
+    return True, None
+
+
+TIMING_ENABLED, TIMING_LIMIT = _parse_timing_env("VLASH_TIMING")
+TIMING_COUNT = 0
 from transformers.models.paligemma.modeling_paligemma import PaliGemmaForConditionalGeneration
 from transformers import AutoTokenizer
 
@@ -1334,14 +1349,16 @@ class PI05Policy(PreTrainedPolicy):
         Returns:
             Single action [action_dim].
         """
+        global TIMING_COUNT
         if len(self._action_queue) == 0:
-            if TIMING_ENABLED:
+            if TIMING_ENABLED and (TIMING_LIMIT is None or TIMING_COUNT < TIMING_LIMIT):
                 torch.cuda.synchronize()
                 start_time = time.perf_counter()
                 actions = self.predict_action_chunk(batch, noise=noise)
                 torch.cuda.synchronize()
                 elapsed = time.perf_counter() - start_time
                 print(f"PREDICT_CHUNK {elapsed:.6f}")
+                TIMING_COUNT += 1
             else:
                 actions = self.predict_action_chunk(batch, noise=noise)
             self._action_queue.extend(actions.transpose(0, 1)[: self.config.n_action_steps])
