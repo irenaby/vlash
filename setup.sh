@@ -13,7 +13,6 @@ cd /dev/shm
 git clone https://github.com/irenaby/vlash.git vlash_fork && cd vlash_fork && git checkout mylibero
 conda env create -f ./conda_env.yaml
 conda activate vlash
-pip install torch==2.7.1 tochvision==0.22.1 --index-url https://download.pytorch.org/whl/cu126
 pip install -e .
 
 sleep 5d
