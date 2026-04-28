@@ -31,6 +31,7 @@ def _parse_timing_env(name: str) -> tuple[bool, int | None]:
 TIMING_ENABLED, TIMING_LIMIT = _parse_timing_env("VLASH_TIMING")
 TIMING_COUNT = 0
 TIMING_EPISODE_ENABLED = os.getenv("VLASH_TIMING_EPISODE", "").lower() not in ("", "0", "false", "no")
+DETERMINISTIC_ENABLED = os.getenv("VLASH_DETERMINISTIC", "").lower() not in ("", "0", "false", "no")
 
 # Register VLASH policy configs (pi0/pi05) into LeRobot's config registry
 # so `PreTrainedConfig.from_pretrained()` can decode VLASH config.json.
@@ -691,9 +692,13 @@ def eval_main(cfg: EvalPipelineConfig):
     
     logging.info(pformat(asdict(cfg)))
     device = get_safe_torch_device(cfg.policy.device, log=True)
-    
-    torch.backends.cudnn.benchmark = True
-    torch.backends.cuda.matmul.allow_tf32 = True
+    if DETERMINISTIC_ENABLED:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.use_deterministic_algorithms(True)
+    else:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
     set_seed(cfg.seed)
 
     logging.info(colored("Output dir:", "yellow", attrs=["bold"]) + f" {cfg.output_dir}")
