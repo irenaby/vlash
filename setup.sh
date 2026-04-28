@@ -14,5 +14,5 @@ git clone https://github.com/irenaby/vlash.git vlash_fork && cd vlash_fork && gi
 conda env create -f ./conda_env.yaml
 conda activate vlash
 pip install -e .
-
+pip install mujoco==3.3.7 numpy==1.24.4 || echo foo
 sleep 5d
