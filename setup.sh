@@ -13,8 +13,10 @@ conda create -n kinetix python==3.11
 conda activate kinetix
 
 REPO_ROOT=/dev/shm
+BRANCH=mykinetix
+
 cd $REPO_ROOT
-git clone https://github.com/irenaby/vlash.git vlash_fork && cd vlash_fork && git checkout mykinetix
+git clone https://github.com/irenaby/vlash.git vlash_fork && cd vlash_fork && git checkout $BRANCH
 git submodule update --init --recursive
 cd benchmarks/kinetix/third_party/kinetix
 pip install -e .
@@ -29,13 +31,16 @@ pip install jax==0.4.34 jax-cuda12-pjrt==0.4.34 jax-cuda12-plugin==0.4.34 jaxlib
 #cd benchmarks/kinetix
 #python src/eval_flow.py --run-path $ckpt_path --output-dir /outputs/eval_outputs
 
+# download expert ckechpoints and kinetix trajectories it created or something like that ???
 pip install gsutil
 mkdir /app/data
 gsutil -m rsync -r gs://rtc-assets/expert/ /app/data/
 
 export WANDB_MODE=disabled
 cd $REPO_ROOT/benchmark/kinetix
-EXPERT_DATA=/app/data OUTDIR=/outputs N_GPUS=4 bash ../train_kinetix.sh    # this is a modified copy of scripts/train.sh from benchmark/kinetix git submodule
+EXPERT_DATA=/app/data OUTDIR=/outputs N_GPUS=4 bash ../train_kinetix.sh > /outputs/train_vlash_kinetix.log 2>&1 &    # this is a modified copy of scripts/train.sh from benchmark/kinetix git submodule
+pid=$!
+wait $pid 
 
 #pip install mujoco==3.3.7 numpy==1.24.4 || echo foo
 sleep 5d
