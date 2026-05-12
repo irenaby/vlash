@@ -3,7 +3,7 @@ set -euo pipefail
 set -x
 
 : "${POLICY_PATH:=mit-han-lab/vlash-pi05-libero-async5}"
-: "${NUM_GPUS:=8}"
+: "${NUM_GPUS:=$(nvidia-smi -L | wc -l)}"
 : "${N_EPISODES:=500}"
 : "${BATCH_SIZE:=32}"
 : "${N_ACTION_STEPS:=5}"
